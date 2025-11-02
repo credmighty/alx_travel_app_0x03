@@ -18,6 +18,7 @@ from .serializers import (CustomUserSerializer,
                           ReviewSerializer, 
                           PaymentSerializer
 )
+from .tasks import send_booking_confirmation_email
 
 
 # Create your views here.
@@ -56,6 +57,12 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+        booking = serializer.save()
+        user_email = booking.user.email
+        trip_title = booking.trip.title
+
+         # Trigger Celery task
+        send_booking_confirmation_email.delay(user_email, trip_title)
        
 
 class ReviewViewSet(viewsets.ModelViewSet):
