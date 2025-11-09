@@ -1,155 +1,88 @@
-from django.db import models
+
 import uuid
-from django.utils import timezone
-from django.db.models import Q, F
-
-# Create your models here.
-
-BOOKING_STATUS = [
-        ('pending', 'Pending'),
-        ('confirmed', 'Confirmed'),
-        ('canceled', 'Canceled')
-    ]
-class Location(models.Model):
-    location_id = models.UUIDField(
-            primary_key=True,
-            default=uuid.uuid4,
-            editable=False
-        )
-    city = models.CharField(
-            max_length=100,
-            null=False
-        )
-    state = models.CharField(
-            max_length=100,
-            null=False
-        )
-    country = models.CharField(
-            max_length=100,
-            null=False
-        )
-
-    def __str__(self):
-        return self.city
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Listing(models.Model):
-    property_id = models.UUIDField(
-            primary_key=True,
-            default=uuid.uuid4,
-            editable=False
-        )
-    host_id = models.ForeignKey(
-            'user',
-            on_delete=models.CASCADE,
-            related_name='listings',
-            null=False,
-            db_index=True
-        )
-    name = models.CharField(
-            max_length=200,
-            null=False
-        )
+    listing_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=200)
     description = models.TextField()
-    location_id = models.ForeignKey(
-            'location',
-            on_delete=models.CASCADE,
-            db_index=True
-        )
-    price_per_night = models.DecimalField(
-            max_digits=10,
-            decimal_places=2
-        )
-    created_at = models.DateFieldTime(auto_now_add=True)
-    updated_at = models.DateFieldTime(auto_now_add=True)
+    price_per_night = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    location = models.CharField(max_length=100)
+    amenities = models.TextField(help_text="Comma-separated list of amenities")
+    host = models.ForeignKey(User, on_delete=models.CASCADE, related_name='listings')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_available = models.BooleanField(default=True)
 
     def __str__(self):
-        return f"{self.name} - {self.host_id_username}"
-
-
-class booking(models.Model):
-    booking_id = models.UUIDField(
-            primary_key=True,
-            default=uuid.uuid4,
-            editable=False
-        )
-    user_id = models.ForeignKey(
-            'user',
-            on_delete=models.CASCADE,
-            related_name='booking',
-            null=False,
-            db_index=True
-        )
-    property_id = models.ForeignKey(
-            'listing',
-            on_delete=models.CASCADE,
-            related_name='booking',
-            null=False,
-            db_index=True
-        )
-    start_date = models.DateTimeField()
-    end_date = models.DateTimeField()
-    status = models.CharField(
-            max_length=200,
-            null=False,
-            choices=BOOKING_STATUS
-        )
-
-    def __str__(self):
-        return f"By {self.user_id.username} for {self.property_id.name}"
+        return self.title
 
     class Meta:
-        constraints = [
-                models.CheckConstraint(
-                    check=Q(end_date__gt=F('start_date')),
-                    name="end_date_gt_start_date"
-                ),
-                models.CheckConstraint(
-                    check=Q(start_date__gte=timezone.now()),
-                    name="start_date_gte_now"
-                ),
-            ]
+        ordering = ['-created_at']
+
+
+class Booking(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    ]
+
+    booking_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='bookings')
+    guest = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bookings')
+    check_in_date = models.DateField()
+    check_out_date = models.DateField()
+    total_price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Booking for {self.listing.title} by {self.guest.username}"
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class Review(models.Model):
     review_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    property_id = models.ForeignKey('listings', on_delete=models.CASCADE, related_name='reviews', null=False, db_index=True)
-    user_id = models.ForeignKey('user', on_delete=models.CASCADE, related_name='reviews', null=False, db_index=True)
-    rating = models.PositiveSmallIntegerField(null=False)
-    comment = models.TextField(null=False)
+    listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='reviews')
+    reviewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                check=Q(rating__gte=1),
-                name="rating_non_negative"
-            ),
-            models.CheckConstraint(
-                check=Q(rating__lte=5),
-                name="rating_not_gt_5"
-            )
-        ]
-
     def __str__(self):
-        return f'"{self.comment}" -{self.user_id.username}'
+        return f"Review for {self.listing.title} by {self.reviewer.username}"
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['listing', 'reviewer']  # One review per user per listing
 
 
 class Payment(models.Model):
-    STATUS_CHOICES = (
+    PAYMENT_STATUS_CHOICES = [
         ('pending', 'Pending'),
-        ('successful', 'Successful'),
+        ('completed', 'Completed'),
         ('failed', 'Failed'),
-    )
+    ]
 
-    user_id = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payments')
-    booking_reference = models.CharField(max_length=100, unique=True)
-    transaction_id = models.CharField(max_length=100, blank=True, null=True)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=10, default='NGN')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='payment')
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    transaction_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    reference = models.CharField(max_length=255, unique=True)
+    status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
+    payment_method = models.CharField(max_length=50, default='chapa')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user.username} - {self.booking_reference} ({self.status})"
+        return f"Payment {self.reference} - {self.status}"
+
+    class Meta:
+        ordering = ['-created_at']

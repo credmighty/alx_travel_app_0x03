@@ -1,11 +1,12 @@
 from django.urls import path, include
-from rest_framework import routers
-from .views import ListingViewset, BookingViewSet
+from rest_framework.routers import DefaultRouter
+from .views import ListingViewSet, BookingViewSet, PaymentViewSet
 
-router = routers.DefaultRouter()
-router.register('listings', ListingViewSet, basename='listing')
-router.register('bookings', BookingViewSet, basename='booking')
+router = DefaultRouter()
+router.register(r'listings', ListingViewSet)
+router.register(r'bookings', BookingViewSet)
+router.register(r'payments', PaymentViewSet)
 
 urlpatterns = [
-    path('', include(router.urls))
+    path('api/', include(router.urls)),
 ]
